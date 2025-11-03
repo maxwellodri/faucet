@@ -73,7 +73,6 @@ struct Options {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(untagged)]
 enum DisplayServer {
     X11,
     Wayland,
