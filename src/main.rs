@@ -60,6 +60,11 @@ fn default_max_threshold() -> i32 {
 struct Config {
     commands: IndexMap<String, Command>,
     scorers: Vec<Scorer>,
+    options: Options,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Options {
     #[serde(default = "default_min_threshold")]
     auto_select_min_threshold: i32,
     #[serde(default = "default_max_threshold")]
@@ -80,11 +85,11 @@ fn validate_environment(config: &Config) -> Result<()> {
         check_command_exists(cmd)?;
     }
 
-    if config.auto_select_min_threshold >= config.auto_select_max_threshold {
+    if config.options.auto_select_min_threshold >= config.options.auto_select_max_threshold {
         anyhow::bail!(
             "Bad auto select values: min ({}) >= max ({})",
-            config.auto_select_min_threshold,
-            config.auto_select_max_threshold
+            config.options.auto_select_min_threshold,
+            config.options.auto_select_max_threshold
         );
     }
 
@@ -420,16 +425,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         num_cmds
-            if (num_cmds == 1 && sorted_commands[0].1 .1 .1 > config.auto_select_min_threshold)
+            if (num_cmds == 1 && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold)
                 || (num_cmds >= 2
                     && sorted_commands[0].1 .1 .1
-                        > config.auto_select_max_threshold + sorted_commands[1].1 .1 .1
+                        > config.options.auto_select_max_threshold + sorted_commands[1].1 .1 .1
                     && sorted_commands[0].1 .1 .1 > 10) =>
         {
             debug!(
                 "Matched auto-select (max threshold: {}, min threshold: {}): {} with score of {}",
-                config.auto_select_max_threshold,
-                config.auto_select_min_threshold,
+                config.options.auto_select_max_threshold,
+                config.options.auto_select_min_threshold,
                 sorted_commands[0].1 .0,
                 sorted_commands[0].1 .1 .1
             );
