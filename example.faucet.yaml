@@ -1,0 +1,58 @@
+options:
+  auto_select_max_threshold: 100
+  auto_select_min_threshold: 10
+commands:
+  browser:
+    display: "🌐 Open in Browser"
+    command: xdg-open "$TEXT"
+  
+  search_web:
+    display: "🔍 Search Web"
+    command: xdg-open "https://www.google.com/search?q=$TEXT"
+  
+  edit_text:
+    display: "📝 Edit Text"
+    command: xdg-open "$DATA_FILE"
+  
+  copy_file:
+    display: "📋 Copy to /tmp"
+    command: cp "$DATA_FILE" /tmp/faucet_copy && notify-send "Copied to /tmp/faucet_copy"
+  
+  qr_code:
+    display: "📸 Generate QR Code"
+    command: qrencode -t PNG -o /tmp/qr.png "$TEXT" && xdg-open /tmp/qr.png
+
+scorers:
+  - regex: '^https?://.*'
+    command_label: browser
+    score_change: 20
+
+  - command: '[ -f "$TEXT" ] && grep -qI . "$TEXT" 2>/dev/null'
+    command_label: edit_text
+    score_change: 15
+
+  - regex: '^(?:https?://.*(?:\n|$)){2,}$'
+    scores:
+      - ["edit_text", 25]
+      - ["browser", -10]
+
+  - regex: '^\S+$'
+    command_label: qr_code
+    score_change: 5
+
+  - regex: '^https?://.*'
+    command_label: qr_code
+    score_change: -100
+
+  - command: '[ -f "$TEXT" ] || [ -d "$TEXT" ]'
+    scores:
+      - ["copy_file", 10]
+      - ["edit_text", 5]
+
+  - regex: '\S'
+    command_label: search_web
+    score_change: 3
+
+  - regex: '^https?://.*'
+    command_label: search_web
+    score_change: -100
