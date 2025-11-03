@@ -106,32 +106,32 @@ fn validate_environment(config: &Config) -> Result<()> {
         );
     }
 
-let missing_commands: Vec<(String, String, String)> = config
-    .scorers
-    .iter()
-    .flat_map(|scorer| {
-        scorer.command_labels().filter_map(move |label| {
-            if !config.commands.contains_key(label) {
-                Some(match scorer {
-                    Scorer::Regex { regex, .. } => {
-                        ("regex".to_string(), regex.clone(), label.to_string())
-                    }
-                    Scorer::Command { command, .. } => {
-                        ("command".to_string(), command.clone(), label.to_string())
-                    }
-                    Scorer::RegexMulti { regex, .. } => {
-                        ("regex_multi".to_string(), regex.clone(), label.to_string())
-                    }
-                    Scorer::CommandMulti { command, .. } => {
-                        ("command_multi".to_string(), command.clone(), label.to_string())
-                    }
-                })
-            } else {
-                None
-            }
+    let missing_commands: Vec<(String, String, String)> = config
+        .scorers
+        .iter()
+        .flat_map(|scorer| {
+            scorer.command_labels().filter_map(move |label| {
+                if !config.commands.contains_key(label) {
+                    Some(match scorer {
+                        Scorer::Regex { regex, .. } => {
+                            ("regex".to_string(), regex.clone(), label.to_string())
+                        }
+                        Scorer::Command { command, .. } => {
+                            ("command".to_string(), command.clone(), label.to_string())
+                        }
+                        Scorer::RegexMulti { regex, .. } => {
+                            ("regex_multi".to_string(), regex.clone(), label.to_string())
+                        }
+                        Scorer::CommandMulti { command, .. } => {
+                            ("command_multi".to_string(), command.clone(), label.to_string())
+                        }
+                    })
+                } else {
+                    None
+                }
+            })
         })
-    })
-    .collect();
+        .collect();
 
     if !missing_commands.is_empty() {
         let error_msg = missing_commands
@@ -182,17 +182,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     let config_path = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?.join("faucet").join("faucet.yaml");
-    
+
     let config_content = std::fs::read_to_string(&config_path)
         .map_err(|e| anyhow::anyhow!("Failed to read config file at '{}': {}", config_path.display(), e))?;
-    
+
     let config: Config = serde_yaml::from_str(&config_content)
         .map_err(|e| anyhow::anyhow!(
             "Failed to parse config file '{}':\n{}",
             config_path.display(),
             e
         ))?;
-    
+
     validate_environment(&config)?;
 
     debug!(
@@ -264,7 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let targets = std::process::Command::new("sh")
                 .args(["-c", "xclip -selection primary -t TARGETS -o"])
                 .output()?
-                .stdout;
+            .stdout;
 
             let targets_str = String::from_utf8_lossy(&targets);
 
@@ -273,24 +273,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::Command::new("sh")
                         .args(["-c", "xclip -selection primary -t image/png -o"])
                         .output()?
-                        .stdout
+                    .stdout
                 } else if targets_str.contains("image/jpeg") {
                     std::process::Command::new("sh")
                         .args(["-c", "xclip -selection primary -t image/jpeg -o"])
                         .output()?
-                        .stdout
+                    .stdout
                 } else {
                     std::process::Command::new("sh")
                         .args(["-c", "xclip -selection primary -t image -o"])
                         .output()?
-                        .stdout
+                    .stdout
                 };
                 Data::Binary(selection_bytes)
             } else {
                 let selection_bytes = std::process::Command::new("sh")
                     .args(["-c", "xclip -selection primary -o"])
                     .output()?
-                    .stdout;
+                .stdout;
 
                 if let Ok(text) = String::from_utf8(selection_bytes.clone()) {
                     Data::Text(text)
@@ -338,108 +338,108 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     config.scorers.iter().for_each(|scorer| match scorer {
-    Scorer::Regex {
-        regex,
-        command_label,
-        score_change,
-    } => {
-        if let Ok(re) = Regex::new(regex)
+        Scorer::Regex {
+            regex,
+            command_label,
+            score_change,
+        } => {
+            if let Ok(re) = Regex::new(regex)
             && re.is_match(&text_for_matching)
             && let Some((command, score)) = scored_commands.get_mut(command_label)
-        {
-            trace!(
-                "Updating score for command '{}' ('{}'): {} -> {}",
-                command.display,
-                command.command,
-                *score,
-                *score + score_change
-            );
-            *score += score_change;
-        }
-    }
-    Scorer::Command {
-        command,
-        command_label,
-        score_change,
-    } => {
-        let mut cmd = std::process::Command::new("sh");
-        cmd.args(["-c", command])
-            .env("DATA_FILE", temp_file)
-            .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
-        if data.is_text() {
-            cmd.env("TEXT", &text_for_matching);
-        }
-        let command_succeeded = match cmd.status() {
-            Ok(status) => status.success(),
-            Err(e) => {
-                error!("Failed to execute command for scoring: {e}");
-                false
+            {
+                trace!(
+                    "Updating score for command '{}' ('{}'): {} -> {}",
+                    command.display,
+                    command.command,
+                    *score,
+                    *score + score_change
+                );
+                *score += score_change;
             }
-        };
-        tracing::trace!("Command ({}) for {} {}", command, command_label, if command_succeeded { "succeeded"} else { "did not succeed"});
-        if command_succeeded
+        }
+        Scorer::Command {
+            command,
+            command_label,
+            score_change,
+        } => {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.args(["-c", command])
+                .env("DATA_FILE", temp_file)
+                .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
+            if data.is_text() {
+                cmd.env("TEXT", &text_for_matching);
+            }
+            let command_succeeded = match cmd.status() {
+                Ok(status) => status.success(),
+                Err(e) => {
+                    error!("Failed to execute command for scoring: {e}");
+                    false
+                }
+            };
+            tracing::trace!("Command ({}) for {} {}", command, command_label, if command_succeeded { "succeeded"} else { "did not succeed"});
+            if command_succeeded
             && let Some((command, score)) = scored_commands.get_mut(command_label)
-        {
-            trace!(
-                "Command scoring succeeded for '{}' ('{}'): {} -> {}",
-                command.display,
-                command.command,
-                *score,
-                *score + score_change
-            );
-            *score += score_change;
-        }
-    }
-    Scorer::RegexMulti { regex, scores } => {
-        if let Ok(re) = Regex::new(regex)
-            && re.is_match(&text_for_matching)
-        {
-            scores.iter().for_each(|(command_label, score_change)| {
-                if let Some((command, score)) = scored_commands.get_mut(command_label) {
-                    trace!(
-                        "Updating score for command '{}' ('{}'): {} -> {}",
-                        command.display,
-                        command.command,
-                        *score,
-                        *score + score_change
-                    );
-                    *score += score_change;
-                }
-            });
-        }
-    }
-    Scorer::CommandMulti { command, scores } => {
-        let mut cmd = std::process::Command::new("sh");
-        cmd.args(["-c", command])
-            .env("DATA_FILE", temp_file)
-            .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
-        if data.is_text() {
-            cmd.env("TEXT", &text_for_matching);
-        }
-        let command_succeeded = match cmd.status() {
-            Ok(status) => status.success(),
-            Err(e) => {
-                error!("Failed to execute command for scoring: {e}");
-                false
+            {
+                trace!(
+                    "Command scoring succeeded for '{}' ('{}'): {} -> {}",
+                    command.display,
+                    command.command,
+                    *score,
+                    *score + score_change
+                );
+                *score += score_change;
             }
-        };
-        tracing::trace!("Command ({}) {}\nLabels: {}", command, if command_succeeded { "succeeded"} else { "did not succeed"}, scores.iter().map(|s| s.0.to_string()).join(", "));
-        if command_succeeded {
-            scores.iter().for_each(|(command_label, score_change)| {
-                if let Some((command, score)) = scored_commands.get_mut(command_label) {
-                    trace!(
-                        "Command scoring succeeded for '{}' ('{}'): {} -> {}",
-                        command.display,
-                        command.command,
-                        *score,
-                        *score + score_change
-                    );
-                    *score += score_change;
-                }
-            });
         }
-    }
-});
+        Scorer::RegexMulti { regex, scores } => {
+            if let Ok(re) = Regex::new(regex)
+            && re.is_match(&text_for_matching)
+            {
+                scores.iter().for_each(|(command_label, score_change)| {
+                    if let Some((command, score)) = scored_commands.get_mut(command_label) {
+                        trace!(
+                            "Updating score for command '{}' ('{}'): {} -> {}",
+                            command.display,
+                            command.command,
+                            *score,
+                            *score + score_change
+                        );
+                        *score += score_change;
+                    }
+                });
+            }
+        }
+        Scorer::CommandMulti { command, scores } => {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.args(["-c", command])
+                .env("DATA_FILE", temp_file)
+                .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
+            if data.is_text() {
+                cmd.env("TEXT", &text_for_matching);
+            }
+            let command_succeeded = match cmd.status() {
+                Ok(status) => status.success(),
+                Err(e) => {
+                    error!("Failed to execute command for scoring: {e}");
+                    false
+                }
+            };
+            tracing::trace!("Command ({}) {}\nLabels: {}", command, if command_succeeded { "succeeded"} else { "did not succeed"}, scores.iter().map(|s| s.0.to_string()).join(", "));
+            if command_succeeded {
+                scores.iter().for_each(|(command_label, score_change)| {
+                    if let Some((command, score)) = scored_commands.get_mut(command_label) {
+                        trace!(
+                            "Command scoring succeeded for '{}' ('{}'): {} -> {}",
+                            command.display,
+                            command.command,
+                            *score,
+                            *score + score_change
+                        );
+                        *score += score_change;
+                    }
+                });
+            }
+        }
+    });
     let mut sorted_commands: Vec<_> = scored_commands
         .iter()
         .enumerate()
@@ -453,11 +453,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         num_cmds
-            if (num_cmds == 1 && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold)
-                || (num_cmds >= 2
-                    && sorted_commands[0].1 .1 .1
-                        > config.options.auto_select_max_threshold + sorted_commands[1].1 .1 .1
-                    && sorted_commands[0].1 .1 .1 > 10) =>
+        if (num_cmds == 1 && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold)
+        || (num_cmds >= 2
+        && sorted_commands[0].1 .1 .1 - sorted_commands[1].1 .1 .1
+        > config.options.auto_select_max_threshold
+        && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold) =>
         {
             debug!(
                 "Matched auto-select (max threshold: {}, min threshold: {}): {} with score of {}",
@@ -485,9 +485,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect::<Vec<_>>()
                 .join("\n");
             debug!("Concatenated labels to dmenu: {labels}");
-
+            let dmenu_arg =  format!("dmenu -l 20 -c -i -p 'Faucet for {}'", if data.is_text() { "text" } else { "binary data" });
             let mut child = std::process::Command::new("sh")
-                .args(["-c", "dmenu -l 20 -c -i -p 'Faucet'"])
+                .args(["-c", &dmenu_arg])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .spawn()?;
