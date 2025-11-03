@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::io::{stdin, IsTerminal, Read, Write};
 use tracing::{debug, error, trace};
-use itertools::Either;
+use itertools::{Either, Itertools};
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
@@ -69,10 +69,20 @@ struct Options {
     auto_select_min_threshold: i32,
     #[serde(default = "default_max_threshold")]
     auto_select_max_threshold: i32,
+    display_server: DisplayServer,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum DisplayServer {
+    X11,
+    Wayland,
 }
 
 fn check_command_exists(command: &str) -> Result<()> {
-    let status = std::process::Command::new("which").arg(command).status()?;
+    let status = std::process::Command::new("which").arg(command)
+        .stdout(std::process::Stdio::null())
+        .status()?;
 
     if !status.success() {
         anyhow::bail!("Required command '{}' not found in PATH", command);
@@ -81,7 +91,11 @@ fn check_command_exists(command: &str) -> Result<()> {
 }
 
 fn validate_environment(config: &Config) -> Result<()> {
-    for cmd in ["file", "dmenu", "xclip", "sh"] {
+    let clipboard = match config.options.display_server {
+        DisplayServer::X11 => "xclip",
+        DisplayServer::Wayland => "wl-paste",
+    };
+    for cmd in ["file", "dmenu", clipboard, "sh"] {
         check_command_exists(cmd)?;
     }
 
@@ -204,11 +218,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ => {
                         data_source = "clipboard";
-                        let clipboard_bytes = std::process::Command::new("sh")
-                            .args(["-c", "xclip -selection clipboard -o"])
-                            .output()?
-                            .stdout;
-
+                        let clipboard_bytes = match config.options.display_server {
+                            DisplayServer::X11 => {
+                                std::process::Command::new("sh")
+                                    .args(["-c", "xclip -selection clipboard -o"])
+                                    .output()?
+                                .stdout
+                            },
+                            DisplayServer::Wayland => {
+                                std::process::Command::new("wl-paste")
+                                    .output()?
+                                .stdout
+                            },
+                        };
                         if let Ok(text) = String::from_utf8(clipboard_bytes.clone()) {
                             Data::Text(text)
                         } else {
@@ -218,11 +240,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 data_source = "clipboard";
-                let clipboard_bytes = std::process::Command::new("sh")
-                    .args(["-c", "xclip -selection clipboard -o"])
-                    .output()?
-                    .stdout;
-
+                let clipboard_bytes = match config.options.display_server {
+                    DisplayServer::X11 => {
+                        std::process::Command::new("sh")
+                            .args(["-c", "xclip -selection clipboard -o"])
+                            .output()?
+                        .stdout
+                    },
+                    DisplayServer::Wayland => {
+                        std::process::Command::new("wl-paste")
+                            .output()?
+                        .stdout
+                    }};
                 if let Ok(text) = String::from_utf8(clipboard_bytes.clone()) {
                     Data::Text(text)
                 } else {
@@ -348,7 +377,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false
             }
         };
-        tracing::info!("command_succeeded: {command_succeeded}");
+        tracing::trace!("Command ({}) for {} {}", command, command_label, if command_succeeded { "succeeded"} else { "did not succeed"});
         if command_succeeded
             && let Some((command, score)) = scored_commands.get_mut(command_label)
         {
@@ -395,7 +424,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false
             }
         };
-        tracing::info!("command_succeeded: {command_succeeded}");
+        tracing::trace!("Command ({}) {}\nLabels: {}", command, if command_succeeded { "succeeded"} else { "did not succeed"}, scores.iter().map(|s| s.0.to_string()).join(", "));
         if command_succeeded {
             scores.iter().for_each(|(command_label, score_change)| {
                 if let Some((command, score)) = scored_commands.get_mut(command_label) {

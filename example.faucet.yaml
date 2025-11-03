@@ -1,6 +1,7 @@
 options:
   auto_select_max_threshold: 100
   auto_select_min_threshold: 10
+  display_server: "X11" # or "Wayland", requires xclip or wl-paste respectively 
 commands:
   browser:
     display: "🌐 Open in Browser"
