@@ -1,7 +1,8 @@
 options:
   auto_select_max_threshold: 100
   auto_select_min_threshold: 10
-  display_server: "X11" # or "Wayland", requires xclip or wl-paste respectively 
+  display_server: "X11" # or "Wayland", requires xclip or wl-paste respectively
+  dmenu_command: "dmenu -l 20 -c -i -p 'Faucet: '" # Can use dmenu, fzf, rofi, or custom script. Receives IS_BINARY and DATA_FILE env vars. Recieves TEXT env var if the data is text.
 commands:
   browser:
     display: "🌐 Open in Browser"

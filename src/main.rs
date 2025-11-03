@@ -56,6 +56,10 @@ fn default_max_threshold() -> i32 {
     100
 }
 
+fn default_dmenu_command() -> String {
+    "dmenu -l 20 -c -i -p 'Faucet: '".to_string()
+}
+
 #[derive(Serialize, Deserialize)]
 struct Config {
     commands: IndexMap<String, Command>,
@@ -69,6 +73,8 @@ struct Options {
     auto_select_min_threshold: i32,
     #[serde(default = "default_max_threshold")]
     auto_select_max_threshold: i32,
+    #[serde(default = "default_dmenu_command")]
+    dmenu_command: String,
     display_server: DisplayServer,
 }
 
@@ -259,43 +265,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         2 if args[1] == "sel" => {
-            data_source = "selection";
-
-            let targets = std::process::Command::new("sh")
-                .args(["-c", "xclip -selection primary -t TARGETS -o"])
-                .output()?
-            .stdout;
-
-            let targets_str = String::from_utf8_lossy(&targets);
-
-            if targets_str.contains("image/") {
-                let selection_bytes = if targets_str.contains("image/png") {
-                    std::process::Command::new("sh")
-                        .args(["-c", "xclip -selection primary -t image/png -o"])
-                        .output()?
-                    .stdout
-                } else if targets_str.contains("image/jpeg") {
-                    std::process::Command::new("sh")
-                        .args(["-c", "xclip -selection primary -t image/jpeg -o"])
-                        .output()?
-                    .stdout
+            // Selection mode only works on X11
+            if matches!(config.options.display_server, DisplayServer::Wayland) {
+                tracing::warn!("'sel' mode only works on X11, falling back to clipboard");
+                data_source = "clipboard";
+                let clipboard_bytes = std::process::Command::new("wl-paste")
+                    .output()?
+                    .stdout;
+                if let Ok(text) = String::from_utf8(clipboard_bytes.clone()) {
+                    Data::Text(text)
                 } else {
-                    std::process::Command::new("sh")
-                        .args(["-c", "xclip -selection primary -t image -o"])
-                        .output()?
-                    .stdout
-                };
-                Data::Binary(selection_bytes)
+                    Data::Binary(clipboard_bytes)
+                }
             } else {
-                let selection_bytes = std::process::Command::new("sh")
-                    .args(["-c", "xclip -selection primary -o"])
+                data_source = "selection";
+
+                let targets = std::process::Command::new("sh")
+                    .args(["-c", "xclip -selection primary -t TARGETS -o"])
                     .output()?
                 .stdout;
 
-                if let Ok(text) = String::from_utf8(selection_bytes.clone()) {
-                    Data::Text(text)
-                } else {
+                let targets_str = String::from_utf8_lossy(&targets);
+
+                if targets_str.contains("image/") {
+                    let selection_bytes = if targets_str.contains("image/png") {
+                        std::process::Command::new("sh")
+                            .args(["-c", "xclip -selection primary -t image/png -o"])
+                            .output()?
+                        .stdout
+                    } else if targets_str.contains("image/jpeg") {
+                        std::process::Command::new("sh")
+                            .args(["-c", "xclip -selection primary -t image/jpeg -o"])
+                            .output()?
+                        .stdout
+                    } else {
+                        std::process::Command::new("sh")
+                            .args(["-c", "xclip -selection primary -t image -o"])
+                            .output()?
+                        .stdout
+                    };
                     Data::Binary(selection_bytes)
+                } else {
+                    let selection_bytes = std::process::Command::new("sh")
+                        .args(["-c", "xclip -selection primary -o"])
+                        .output()?
+                    .stdout;
+
+                    if let Ok(text) = String::from_utf8(selection_bytes.clone()) {
+                        Data::Text(text)
+                    } else {
+                        Data::Binary(selection_bytes)
+                    }
                 }
             }
         }
@@ -316,10 +336,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let temp_file = "/tmp/faucet_data";
-    data.write_to_temp_file(temp_file)?;
+    let temp_file_handle = tempfile::Builder::new()
+        .prefix("faucet_data_")
+        .tempfile()?;
+    let temp_file_path = temp_file_handle.path().to_str()
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert temp file path to string"))?;
+    data.write_to_temp_file(temp_file_path)?;
 
-    let text_for_matching = data.get_text_for_matching(temp_file)?;
+    let text_for_matching = data.get_text_for_matching(temp_file_path)?;
     let (data_kind, data_as_text) = match data {
         Data::Text(ref text) => ("Text", text.clone()),
         Data::Binary(..) => ("Data", format!("[Binary: {}]", text_for_matching)),
@@ -364,7 +388,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let mut cmd = std::process::Command::new("sh");
             cmd.args(["-c", command])
-                .env("DATA_FILE", temp_file)
+                .env("DATA_FILE", temp_file_path)
                 .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
             if data.is_text() {
                 cmd.env("TEXT", &text_for_matching);
@@ -411,7 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Scorer::CommandMulti { command, scores } => {
             let mut cmd = std::process::Command::new("sh");
             cmd.args(["-c", command])
-                .env("DATA_FILE", temp_file)
+                .env("DATA_FILE", temp_file_path)
                 .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
             if data.is_text() {
                 cmd.env("TEXT", &text_for_matching);
@@ -445,75 +469,86 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enumerate()
         .filter(|(_, (_, (_, score)))| *score > 0)
         .collect();
-    sorted_commands.sort_by(|a, b| b.1 .1 .1.cmp(&a.1 .1 .1).then_with(|| a.0.cmp(&b.0)));
+    sorted_commands.sort_by(|(a_idx, (_, (_, a_score))), (b_idx, (_, (_, b_score)))| {
+        b_score.cmp(a_score).then_with(|| a_idx.cmp(b_idx))
+    });
 
     match sorted_commands.len() {
         0 => {
             debug!("No scorers matched");
             return Ok(());
         }
-        num_cmds
-        if (num_cmds == 1 && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold)
-        || (num_cmds >= 2
-        && sorted_commands[0].1 .1 .1 - sorted_commands[1].1 .1 .1
-        > config.options.auto_select_max_threshold
-        && sorted_commands[0].1 .1 .1 > config.options.auto_select_min_threshold) =>
-        {
-            debug!(
-                "Matched auto-select (max threshold: {}, min threshold: {}): {} with score of {}",
-                config.options.auto_select_max_threshold,
-                config.options.auto_select_min_threshold,
-                sorted_commands[0].1 .0,
-                sorted_commands[0].1 .1 .1
-            );
-            let (_, (_label, (command, _))) = &sorted_commands[0];
-            let mut cmd = std::process::Command::new("sh");
-            cmd.args(["-c", &command.command])
-                .env("DATA_FILE", temp_file)
-                .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
+        num_cmds => {
+            let (_, (label, (command, score))) = &sorted_commands[0];
+            let should_auto_select =
+                (num_cmds == 1 && *score > config.options.auto_select_min_threshold)
+                || (num_cmds >= 2 && {
+                    let (_, (_, (_, second_score))) = &sorted_commands[1];
+                    *score - *second_score > config.options.auto_select_max_threshold
+                        && *score > config.options.auto_select_min_threshold
+                });
 
-            if data.is_text() {
-                cmd.env("TEXT", &text_for_matching);
-            }
-
-            cmd.spawn()?;
-        }
-        _ => {
-            let labels: String = sorted_commands
-                .iter()
-                .map(|(_, (_, (cmd, _)))| cmd.display.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            debug!("Concatenated labels to dmenu: {labels}");
-            let dmenu_arg =  format!("dmenu -l 20 -c -i -p 'Faucet for {}'", if data.is_text() { "text" } else { "binary data" });
-            let mut child = std::process::Command::new("sh")
-                .args(["-c", &dmenu_arg])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()?;
-
-            child.stdin.as_mut().unwrap().write_all(labels.as_bytes())?;
-
-            let output = child.wait_with_output()?;
-            let selected_label = String::from_utf8(output.stdout)?.trim().to_string();
-            let selected_command = scored_commands
-                .iter()
-                .find(|(_, (cmd, _))| cmd.display == selected_label);
-
-            if let Some((label, (command, _))) = selected_command {
-                debug!("Selected command label: {label}");
+            if should_auto_select {
+                debug!(
+                    "Matched auto-select (max threshold: {}, min threshold: {}): {} with score of {}",
+                    config.options.auto_select_max_threshold,
+                    config.options.auto_select_min_threshold,
+                    label,
+                    score
+                );
                 let mut cmd = std::process::Command::new("sh");
                 cmd.args(["-c", &command.command])
-                    .env("DATA_FILE", temp_file)
+                    .env("DATA_FILE", temp_file_path)
                     .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
 
                 if data.is_text() {
                     cmd.env("TEXT", &text_for_matching);
                 }
 
-                cmd.spawn()?;
+                cmd.spawn()?.wait()?;
             } else {
-                debug!("Didn't select a command in dmenu")
+                let labels: String = sorted_commands
+                    .iter()
+                    .map(|(_, (_, (cmd, _)))| cmd.display.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                debug!("Concatenated labels to dmenu: {labels}");
+                let mut cmd = std::process::Command::new("sh");
+                cmd.args(["-c", &config.options.dmenu_command])
+                    .env("IS_BINARY", if data.is_text() { "0" } else { "1" })
+                    .env("DATA_FILE", temp_file_path)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped());
+
+                if data.is_text() {
+                    cmd.env("TEXT", &text_for_matching);
+                }
+
+                let mut child = cmd.spawn()?;
+
+                child.stdin.as_mut().unwrap().write_all(labels.as_bytes())?;
+
+                let output = child.wait_with_output()?;
+                let selected_label = String::from_utf8(output.stdout)?.trim().to_string();
+                let selected_command = scored_commands
+                    .iter()
+                    .find(|(_, (cmd, _))| cmd.display == selected_label);
+
+                if let Some((label, (command, _))) = selected_command {
+                    debug!("Selected command label: {label}");
+                    let mut cmd = std::process::Command::new("sh");
+                    cmd.args(["-c", &command.command])
+                        .env("DATA_FILE", temp_file_path)
+                        .env("IS_BINARY", if data.is_text() { "0" } else { "1" });
+
+                    if data.is_text() {
+                        cmd.env("TEXT", &text_for_matching);
+                    }
+
+                    cmd.spawn()?.wait()?;
+                } else {
+                    debug!("Didn't select a command in dmenu")
+                }
             }
         }
     }
